@@ -18,7 +18,7 @@ function loadConfig(filePath) {
 const programsConfig = loadConfig('./config.yaml');
 // console.log('Loaded programs configuration:', programsConfig);
 
-function startProcess(programName, config, index) {
+function startProcess(programName, config, index, retries = 0) {
     const {
       cmd,
       workingdir,
@@ -26,21 +26,21 @@ function startProcess(programName, config, index) {
       umask,
       stdout,
       stderr,
+      exitcodes = [0],
+      autorestart = 'never',
+      startretries = 0,
+      starttime = 0
     } = config;
   
-    // Split command into executable and args
     const [exec, ...args] = cmd.split(' ');
   
-    // Set up stdout and stderr streams
     const stdoutStream = fs.createWriteStream(stdout, { flags: 'a' });
     const stderrStream = fs.createWriteStream(stderr, { flags: 'a' });
   
-    // Apply umask if defined
     if (umask !== undefined) {
-      process.umask(parseInt(umask, 8)); // convert from string like "022" to octal
+      process.umask(parseInt(umask, 8));
     }
   
-    // Spawn the child process
     const child = spawn(exec, args, {
       cwd: workingdir,
       env: { ...process.env, ...env },
@@ -48,29 +48,56 @@ function startProcess(programName, config, index) {
       detached: false,
     });
   
-    // Pipe output
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
   
     console.log(`Started [${programName}] instance ${index}, PID: ${child.pid}`);
   
-    // Track status (for now just log exits)
+    const processMeta = {
+      child,
+      retries,
+      startTime: Date.now()
+    };
+  
+    // Save to tracking
+    runningProcesses[programName][index] = processMeta;
+  
+    // Handle unexpected exits
     child.on('exit', (code, signal) => {
       console.log(`Process [${programName}] #${index} exited with code ${code}, signal ${signal}`);
+  
+      const expected = exitcodes.includes(code);
+  
+      const isRestartable =
+        (autorestart === 'always') ||
+        (autorestart === 'unexpected' && !expected);
+  
+      if (isRestartable) {
+        if (retries < startretries) {
+          console.log(`Restarting [${programName}] #${index} (attempt ${retries + 1}/${startretries})`);
+  
+          setTimeout(() => {
+            startProcess(programName, config, index, retries + 1);
+          }, starttime * 1000); // Wait starttime before restarting
+        } else {
+          console.warn(`❌ Max retries reached for [${programName}] #${index}. Giving up.`);
+        }
+      }
     });
   
     return child;
 }
+  
 
 const runningProcesses = {};
 
 for (const [programName, config] of Object.entries(programsConfig)) {
-  runningProcesses[programName] = [];
-
-  const count = config.numprocs || 1;
-
-  for (let i = 0; i < count; i++) {
-    const proc = startProcess(programName, config, i);
-    runningProcesses[programName].push(proc);
-  }
+    runningProcesses[programName] = [];
+  
+    const count = config.numprocs || 1;
+  
+    for (let i = 0; i < count; i++) {
+      startProcess(programName, config, i);
+    }
 }
+  
