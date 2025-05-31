@@ -3,7 +3,7 @@ programs:
     cmd: "node server.js"
     workingdir: "./services/web"
     autostart: true
-    numprocs: 1
+    numprocs: 2
     autorestart: unexpected
     exitcodes: [0]
     startretries: 3
@@ -13,8 +13,8 @@ programs:
     stdout: "./logs/web/web.stdout.log"
     stderr: "./logs/web/web.stderr.log"
     env:
-      PORT: "3000"
-    umask: "022"
+      PORT: "5000"
+    umask: "026"
 
   job-worker:
     cmd: "python3 worker.py"
@@ -22,7 +22,7 @@ programs:
     workingdir: "./services/worker"
     autostart: true
     autorestart: unexpected
-    exitcodes: [0, 2]
+    exitcodes: [0]
     startretries: 3
     starttime: 4
     stopsignal: SIGINT
