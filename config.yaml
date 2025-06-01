@@ -21,7 +21,7 @@ programs:
     numprocs: 3
     workingdir: "./services/worker"
     autostart: true
-    autorestart: unexpected
+    autorestart: never
     exitcodes: [0]
     startretries: 3
     starttime: 4

@@ -2,6 +2,11 @@
 
 console.log("🟢 Server started...");
 
+process.on('SIGTERM', () => {
+  console.log("🛑 Received SIGTERM, exiting...");
+  process.exit(0);
+});
+
 setTimeout(() => {
   console.log("✅ Server exiting normally after 10 seconds.");
   process.exit(0); // Normal exit
