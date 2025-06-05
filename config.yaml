@@ -15,6 +15,7 @@ programs:
     env:
       PORT: "5000"
     umask: "026"
+    tags: [web, frontend]
 
   job-worker:
     cmd: "python3 worker.py"
@@ -32,6 +33,7 @@ programs:
     env:
       WORKER_MODE: "parallel"
     umask: "027"
+    tags: [worker, backend]
 
   mailer:
     cmd: "bash run_mailer.sh"
@@ -49,13 +51,14 @@ programs:
     env:
       MAIL_ENV: "production"
     umask: "077"
+    tags: [mail, backend]
 
   debug-task:
     cmd: "node debug.js"
     numprocs: 1
     workingdir: "./services/debug"
     autostart: true
-    autorestart: unexpected
+    autorestart: always
     exitcodes: [0]
     startretries: 1
     starttime: 1
@@ -66,3 +69,4 @@ programs:
     env:
       DEBUG: "true"
     umask: "000"
+    tags: [debug, test]

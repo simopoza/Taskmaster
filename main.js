@@ -1,12 +1,170 @@
 const fs = require('fs');
 const yaml = require('js-yaml');
 const { spawn } = require('child_process');
+const notifier = require('node-notifier');
+const express = require('express');
 const readline = require('readline');
+
+const app = express();
+const PORT = 3000;
+const clients = [];
+
+app.use(express.json());
+
+app.post('/api/cmd', (req, res) => {
+  const { cmd, args } = req.body;
+  // Simulate CLI input
+  rl.emit('line', [cmd, ...(args || [])].join(' '));
+  res.json({ ok: true });
+});
+
+
+// --- SSE endpoint for real-time updates ---
+app.get('/events', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.flushHeaders();
+  clients.push(res);
+
+  req.on('close', () => {
+    const idx = clients.indexOf(res);
+    if (idx !== -1) clients.splice(idx, 1);
+  });
+});
+
+function broadcastStatus() {
+  const status = {};
+  for (const name of Object.keys(programsConfig)) {
+    const instances = runningProcesses[name] || [];
+    status[name] = [];
+    const count = programsConfig[name].numprocs || 1;
+    for (let idx = 0; idx < count; idx++) {
+      const meta = instances[idx];
+      status[name].push({
+        index: idx,
+        pid: meta && meta.child ? meta.child.pid : '-',
+        status: meta && meta.child && meta.child.exitCode === null
+          ? 'RUNNING'
+          : (meta && meta.child ? `EXITED (${meta.child.exitCode})` : 'NOT STARTED')
+      });
+    }
+  }
+  const data = `data: ${JSON.stringify(status)}\n\n`;
+  clients.forEach(res => res.write(data));
+}
+
+app.get('/status', (req, res) => {
+  const status = {};
+  for (const name of Object.keys(programsConfig)) {
+    const instances = runningProcesses[name] || [];
+    status[name] = [];
+    const count = programsConfig[name].numprocs || 1;
+    for (let idx = 0; idx < count; idx++) {
+      const meta = instances[idx];
+      status[name].push({
+        index: idx,
+        pid: meta && meta.child ? meta.child.pid : '-',
+        status: meta && meta.child && meta.child.exitCode === null
+          ? 'RUNNING'
+          : (meta && meta.child ? `EXITED (${meta.child.exitCode})` : 'NOT STARTED')
+      });
+    }
+  }
+  // If browser, show HTML, else JSON
+  if (req.headers.accept && req.headers.accept.includes('text/html')) {
+    let html = `<h1>Taskmaster Status</h1><table border="1" cellpadding="5"><tr><th>Program</th><th>Instance</th><th>PID</th><th>Status</th></tr>`;
+    for (const [name, arr] of Object.entries(status)) {
+      arr.forEach(inst => {
+        html += `<tr>
+          <td>${name}</td>
+          <td>#${inst.index}</td>
+          <td>${inst.pid}</td>
+          <td>${inst.status}</td>
+        </tr>`;
+      });
+    }
+    html += `</table>`;
+    res.send(html);
+  } else {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(status, null, 2));
+  }
+});
+
+// --- Improved HTML dashboard with live updates ---
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Taskmaster Dashboard</title>
+</head>
+<body>
+  <h1>Taskmaster Dashboard (Live)</h1>
+  <table id="status" border="1" cellpadding="5">
+    <tr><th>Program</th><th>Instance</th><th>PID</th><th>Status</th><th>Actions</th></tr>
+  </table>
+  <script>
+    function render(status) {
+      const table = document.getElementById('status');
+      table.innerHTML = '<tr><th>Program</th><th>Instance</th><th>PID</th><th>Status</th><th>Actions</th></tr>';
+      let hasRows = false;
+      for (const [name, arr] of Object.entries(status)) {
+        arr.forEach(inst => {
+          hasRows = true;
+          table.innerHTML += '<tr>' +
+            '<td>' + name + '</td>' +
+            '<td>#' + inst.index + '</td>' +
+            '<td>' + inst.pid + '</td>' +
+            '<td>' + inst.status + '</td>' +
+            '<td>' +
+              '<button onclick="sendCmd(\\'start\\', \\''
+                + name + '\\',' + inst.index + ')">Start</button> ' +
+              '<button onclick="sendCmd(\\'stop\\', \\''
+                + name + '\\',' + inst.index + ')">Stop</button> ' +
+              '<button onclick="sendCmd(\\'restart\\', \\''
+                + name + '\\',' + inst.index + ')">Restart</button>' +
+            '</td>' +
+            '</tr>';
+        });
+      }
+      if (!hasRows) {
+        table.innerHTML += '<tr><td colspan="5">No processes found.</td></tr>';
+      }
+    }
+    function sendCmd(cmd, name, idx) {
+      fetch('/api/cmd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd, args: [name, idx] })
+      });
+    }
+    const evtSource = new EventSource('/events');
+    evtSource.onmessage = function(event) {
+      render(JSON.parse(event.data));
+    };
+    fetch('/status').then(r => r.json()).then(render);
+  </script>
+</body>
+</html>`;
+  res.send(html);
+});
+
+
+app.listen(PORT, () => {
+  // console.log(`🌐 Web dashboard running at http://localhost:${PORT}/`);
+});
+
 
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
-  prompt: 'taskmaster> '
+  prompt: 'taskmaster> ',
+  completer
 });
 
 function loadConfig(filePath) {
@@ -22,6 +180,15 @@ function loadConfig(filePath) {
 
 const programsConfig = loadConfig('./config.yaml');
 const runningProcesses = {};
+
+const commands = ['status', 'start', 'stop', 'restart', 'reload', 'exit'];
+const programNames = Object.keys(programsConfig);
+
+function completer(line) {
+  const completions = commands.concat(Object.keys(programsConfig));
+  const hits = completions.filter(c => c.startsWith(line));
+  return [hits.length ? hits : completions, line];
+}
 
 function isRuntimeConfigChanged(oldDef, newDef) {
   const keysToCheck = ['cmd', 'workingdir', 'env', 'umask', 'stdout', 'stderr'];
@@ -63,6 +230,7 @@ function startProcess(programName, config, index, retries = 0) {
 
   console.log(`Started [${programName}] instance ${index}, PID: ${child.pid}`);
   rl.prompt();
+  broadcastStatus();
 
   const processMeta = {
     child,
@@ -84,10 +252,20 @@ function startProcess(programName, config, index, retries = 0) {
       return;
     }
 
+    broadcastStatus();
+
     const expected = exitcodes.includes(code);
     const isRestartable =
       (autorestart === 'always') ||
       (autorestart === 'unexpected' && !expected);
+
+    if (!expected) {
+      notifier.notify({
+        title: 'Taskmaster: Process Exited Unexpectedly',
+        message: `[${programName}] instance #${index} exited with code ${code}`,
+        sound: true
+      });
+    }
 
     if (isRestartable) {
       if (retries < startretries) {
@@ -208,6 +386,7 @@ function reloadConfig() {
 
   console.log('🔁 Reload complete.');
   rl.prompt();
+  broadcastStatus(); 
 }
 
 process.on('SIGHUP', () => {
@@ -222,13 +401,26 @@ fs.watchFile('./config.yaml', { interval: 500 }, (curr, prev) => {
   }
 });
 
-function showStatus() {
-  for (const [name, instances] of Object.entries(runningProcesses)) {
+function showStatus(programName) {
+  if (programName) {
+    const instances = runningProcesses[programName];
+    if (!instances) {
+      console.log(`No such program: ${programName}`);
+      return;
+    }
     instances.forEach((meta, idx) => {
       if (!meta) return;
       const status = meta.child.exitCode === null ? 'RUNNING' : `EXITED (${meta.child.exitCode})`;
-      console.log(`[${name}] #${idx} PID: ${meta.child.pid} - ${status}`);
+      console.log(`[${programName}] #${idx} PID: ${meta.child.pid} - ${status}`);
     });
+  } else {
+    for (const [name, instances] of Object.entries(runningProcesses)) {
+      instances.forEach((meta, idx) => {
+        if (!meta) return;
+        const status = meta.child.exitCode === null ? 'RUNNING' : `EXITED (${meta.child.exitCode})`;
+        console.log(`[${name}] #${idx} PID: ${meta.child.pid} - ${status}`);
+      });
+    }
   }
 }
 
@@ -248,6 +440,7 @@ function stopProcess(name, idx) {
   meta.child.once('exit', () => {
     console.log(`⏹️ Stopped [${name}] instance #${idx}`);
     rl.prompt();
+    broadcastStatus();
   });
   meta.child.kill();
   setTimeout(() => {
@@ -270,9 +463,9 @@ function startSingleProcess(name, idx) {
 
   // Otherwise, start new process at that index
   const proc = startProcess(name, config, idx);
-  console.log(`▶️ Started [${name}] instance #${idx} (PID: ${proc.pid})`);
+  // console.log(`▶️ Started [${name}] instance #${idx} (PID: ${proc.pid})`);
+  broadcastStatus();
 }
-
 
 function restartProcess(name, idx) {
   const meta = runningProcesses[name] && runningProcesses[name][idx];
@@ -280,8 +473,11 @@ function restartProcess(name, idx) {
     console.log(`No running instance #${idx} for [${name}]`);
     return;
   }
+  meta.stopping = true;
+  meta.child.once('exit', () => {
+    startSingleProcess(name, idx);
+  });
   stopProcess(name, idx);
-  setTimeout(() => startSingleProcess(name, idx), 200);
 }
 
 function stopAll(name) {
@@ -302,6 +498,7 @@ function stopAll(name) {
         console.log(`⏹️ Stopped [${name}] instance #${idx}`);
         pending--;
         if (pending === 0) rl.prompt();
+        broadcastStatus(); 
       });
       meta.child.kill();
       setTimeout(() => {
@@ -324,6 +521,7 @@ function startAll(name) {
   for (let i = 0; i < count; i++) {
     startSingleProcess(name, i);
   }
+  broadcastStatus();
 }
 
 function restartAll(name) {
@@ -341,42 +539,71 @@ function restartAll(name) {
   }
 }
 
+function getProgramsByTag(tag) {
+  return Object.entries(programsConfig)
+    .filter(([name, config]) => Array.isArray(config.tags) && config.tags.includes(tag))
+    .map(([name]) => name);
+}
 
 rl.prompt();
 rl.on('line', (line) => {
   const [cmd, ...args] = line.trim().split(/\s+/);
+
+  // Group support
+  let targets = [];
+  if (args[0] && args[0].startsWith('group:')) {
+    const tag = args[0].slice(6);
+    targets = getProgramsByTag(tag);
+    if (targets.length === 0) {
+      console.log(`No programs found for group: ${tag}`);
+      rl.prompt();
+      return;
+    }
+  } else if (args[0]) {
+    targets = [args[0]];
+  }
+
   switch (cmd) {
     case 'status':
-      showStatus();
+      if (args[0] && args[0].startsWith('group:')) {
+        targets.forEach(name => showStatus(name));
+      } else if (args[0]) {
+        showStatus(args[0]);
+      } else {
+        showStatus();
+      }
       break;
 
     case 'start':
-      if (args.length === 1) {
-        startAll(args[0]);
-      } else if (args.length === 2) {
-        startSingleProcess(args[0], Number(args[1]));
+      if (targets.length > 0) {
+        targets.forEach(name => {
+          if (args[1]) startSingleProcess(name, Number(args[1]));
+          else startAll(name);
+        });
       } else {
-        console.log('Usage: start <program> [index]');
+        console.log('Usage: start <program|group:tag> [index]');
       }
       break;
 
     case 'stop':
-      if (args.length === 1) {
-        stopAll(args[0]);
-      } else if (args.length === 2) {
-        stopProcess(args[0], Number(args[1]));
+      if (targets.length > 0) {
+        targets.forEach(name => {
+          if (args[1]) stopProcess(name, Number(args[1]));
+          else stopAll(name);
+        });
       } else {
-        console.log('Usage: stop <program> [index]');
+        console.log('Usage: stop <program|group:tag> [index]');
       }
       break;
 
     case 'restart':
-      if (args.length === 1) {
-        restartAll(args[0]);
-      } else if (args.length === 2) {
-        restartProcess(args[0], Number(args[1]));
+      if (targets.length > 0) {
+        targets.forEach(name => {
+          if (args[1]) restartProcess(name, Number(args[1]));
+          else restartAll(name);
+        });
       } else {
-        console.log('Usage: restart <program> [index]');
+        console.log('Usage: restart <program|group:tag> [index]');
       }
       break;
 
@@ -400,3 +627,4 @@ rl.on('line', (line) => {
 
   rl.prompt();
 });
+
