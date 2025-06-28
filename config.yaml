@@ -70,3 +70,12 @@ programs:
       DEBUG: "true"
     umask: "000"
     tags: [debug, test]
+  
+  test-logger:
+    cmd: "./scripts/spam.sh"
+    numprocs: 1
+    workingdir: "./"
+    stdout: "./logs/logger/test-logger.stdout.log"
+    stderr: "./logs/logger/test-logger.stderr.log"
+    autostart: false
+    autorestart: never

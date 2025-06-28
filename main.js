@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const notifier = require('node-notifier');
 const express = require('express');
 const readline = require('readline');
+const { Writable } = require('stream');
 
 const app = express();
 const PORT = 3000;
@@ -195,6 +196,47 @@ function isRuntimeConfigChanged(oldDef, newDef) {
   return keysToCheck.some(key => JSON.stringify(oldDef[key]) !== JSON.stringify(newDef[key]));
 }
 
+const MAX_LOG_SIZE = 1024 * 1;
+const MAX_LOG_FILES = 5; // Keep up to 10 rotated logs
+
+class RotatingWriteStream extends Writable {
+  constructor(logPath, maxSize, maxFiles) {
+    super();
+    this.logPath = logPath;
+    this.maxSize = maxSize;
+    this.maxFiles = maxFiles;
+    this.currentSize = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
+    this.stream = fs.createWriteStream(logPath, { flags: 'a' });
+  }
+
+  _rotate() {
+    this.stream.end();
+    for (let i = this.maxFiles - 1; i >= 1; i--) {
+      const src = `${this.logPath}.${i}`;
+      const dest = `${this.logPath}.${i + 1}`;
+      if (fs.existsSync(src)) fs.renameSync(src, dest);
+    }
+    if (fs.existsSync(this.logPath)) {
+      fs.renameSync(this.logPath, `${this.logPath}.1`);
+    }
+    this.stream = fs.createWriteStream(this.logPath, { flags: 'a' });
+    this.currentSize = 0;
+  }
+
+  _write(chunk, encoding, callback) {
+    this.currentSize += Buffer.byteLength(chunk);
+    if (this.currentSize > this.maxSize) {
+      this._rotate();
+      this.currentSize += Buffer.byteLength(chunk); // after rotation, add chunk size
+    }
+    this.stream.write(chunk, encoding, callback);
+  }
+
+  end(...args) {
+    this.stream.end(...args);
+  }
+}
+
 function startProcess(programName, config, index, retries = 0) {
   const {
     cmd,
@@ -211,8 +253,8 @@ function startProcess(programName, config, index, retries = 0) {
 
   const [exec, ...args] = cmd.split(' ');
 
-  const stdoutStream = fs.createWriteStream(stdout, { flags: 'a' });
-  const stderrStream = fs.createWriteStream(stderr, { flags: 'a' });
+  const stdoutStream = new RotatingWriteStream(stdout, MAX_LOG_SIZE, MAX_LOG_FILES);
+  const stderrStream = new RotatingWriteStream(stderr, MAX_LOG_SIZE, MAX_LOG_FILES);
 
   if (umask !== undefined) {
     process.umask(parseInt(umask, 8));
