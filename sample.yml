@@ -1,0 +1,36 @@
+programs:
+
+  nginx:
+    cmd: "python3 -m http.server 8080"
+    numprocs: 3
+    umask: 022
+    workingdir: /tmp
+    autostart: true
+    autorestart: unexpected
+    exitcodes: [0, 2]
+    startretries: 3
+    starttime: 5
+    stopsignal: TERM
+    stoptime: 10
+    stdout: /home/youssef/Desktop/taskmaster/logs/nginx.stdout.log
+    stderr: /home/youssef/Desktop/taskmaster/logs/nginx.stderr.log
+    env:
+      ENV: production
+      STARTED_BY: taskmaster
+
+  test_echo:
+    cmd: "echo Hello from Taskmaster 👋"
+    numprocs: 1
+    umask: 022
+    workingdir: /home/youssef/Desktop/taskmaster/logs
+    autostart: true
+    autorestart: never
+    exitcodes: [0]
+    startretries: 3
+    starttime: 5
+    stopsignal: TERM
+    stoptime: 10
+    stdout: /home/youssef/Desktop/taskmaster/logs/test_echo.out
+    stderr: /home/youssef/Desktop/taskmaster/logs/test_echo.err
+    env:
+      STARTED_BY: taskmaster

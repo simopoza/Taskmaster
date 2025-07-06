@@ -4,7 +4,7 @@ programs:
     workingdir: "./services/web"
     autostart: true
     numprocs: 2
-    autorestart: unexpected
+    autorestart: always
     exitcodes: [0]
     startretries: 3
     starttime: 5
@@ -37,10 +37,10 @@ programs:
 
   mailer:
     cmd: "bash run_mailer.sh"
-    numprocs: 1
+    numprocs: 3
     workingdir: "./scripts"
     autostart: false
-    autorestart: never
+    autorestart: unexpected
     exitcodes: [0]
     startretries: 2
     starttime: 2

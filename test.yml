@@ -1,0 +1,74 @@
+programs:
+
+  worker:
+    cmd: "python3 -c 'import time; print(\"Working...\"); time.sleep(10)'"
+    numprocs: 1
+    workingdir: /tmp
+    autostart: true
+    autorestart: always
+    exitcodes: [0]
+    startretries: 2
+    starttime: 1
+    stoptime: 1
+    stopsignal: TERM
+    stdout: /home/youssef/Desktop/taskmaster/logs/worker.out
+    stderr: /home/youssef/Desktop/taskmaster/logs/worker.err
+  
+  # bash_loop:
+  #   cmd: "bash -c 'while true; do echo loop; sleep 3; done'"
+  #   numprocs: 1
+  #   workingdir: /tmp
+  #   autostart: true
+  #   autorestart: always
+  #   exitcodes: [0]
+  #   startretries: 2
+  #   starttime: 2
+  #   stoptime: 2
+  #   stopsignal: TERM
+  #   stdout: /home/youssef/Desktop/taskmaster/logs/worker.out
+  #   stderr: /home/youssef/Desktop/taskmaster/logs/worker.err
+
+  sleeper:
+    cmd: "sleep 30"
+    numprocs: 1
+    workingdir: /tmp
+    autostart: true
+    autorestart: never
+    exitcodes: [0]
+    startretries: 1
+    starttime: 1
+    stoptime: 1
+    stopsignal: TERM
+    stdout: /home/youssef/Desktop/taskmaster/logs/sleeper.out
+    stderr: /home/youssef/Desktop/taskmaster/logs/sleeper.err
+
+  unstable_job:
+    cmd: "python3 -c 'import random, sys; code = random.choice([0,1]); print(f\"Exiting with code {code}\"); sys.exit(code)'"
+    numprocs: 1
+    workingdir: /tmp
+    autostart: true
+    autorestart: unexpected
+    exitcodes: [0]
+    startretries: 3
+    starttime: 1
+    stoptime: 1
+    stopsignal: TERM
+    stdout: /home/youssef/Desktop/taskmaster/logs/sleeper.out
+    stderr: /home/youssef/Desktop/taskmaster/logs/sleeper.err
+
+  nginx:
+    cmd: "/usr/sbin/nginx -c /home/youssef/Desktop/taskmaster/nginx-test.conf"
+    numprocs: 1
+    workingdir: /home/youssef/Desktop/taskmaster
+    umask: 022
+    autostart: false
+    autorestart: unexpected
+    exitcodes: [0]
+    startretries: 2
+    starttime: 3
+    stoptime: 3
+    stopsignal: TERM
+    stdout: /home/youssef/Desktop/taskmaster/logs/nginx.stdout.log
+    stderr: /home/youssef/Desktop/taskmaster/logs/nginx.stderr.log
+    env:
+      STARTED_BY: taskmaster

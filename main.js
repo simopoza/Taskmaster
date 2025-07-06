@@ -327,12 +327,14 @@ function startProcess(programName, config, index, retries = 0) {
   return child;
 }
 
-// Initial launch: start all programs
+// Initial launch: start only programs with autostart: true
 for (const [programName, config] of Object.entries(programsConfig)) {
   runningProcesses[programName] = [];
-  const count = config.numprocs || 1;
-  for (let i = 0; i < count; i++) {
-    startProcess(programName, config, i);
+  if (config.autostart) { // Only start if autostart is true
+    const count = config.numprocs || 1;
+    for (let i = 0; i < count; i++) {
+      startProcess(programName, config, i);
+    }
   }
 }
 
